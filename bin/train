@@ -1,0 +1,40 @@
+#!/usr/bin/env python
+
+import os.path as osp
+
+import pytorch_lightning as pl
+import hydra
+from omegaconf import OmegaConf
+
+from frozen.data import COCODataModule
+from frozen.experiment import Experiment
+from frozen.util import create_callbacks, create_logger, process_config
+
+
+CONFIG_DIR = osp.abspath(osp.join(__file__, "../..", "config"))
+
+@hydra.main(version_base=None, config_path=CONFIG_DIR, config_name="train")
+def main(config):
+    config = OmegaConf.to_container(config)
+    config = pl.utilities.parsing.AttributeDict(config)
+    config = process_config(config)
+    pl.seed_everything(config["seed"])
+    print(config)
+
+    dm = COCODataModule(config)
+    logger = create_logger(config)
+    callbacks = None
+    if logger is not None:
+        callbacks, ckpt_path = create_callbacks(config, logger.log_dir)
+        config["trainer"]["resume_from_checkpoint"] = ckpt_path
+
+    experiment = Experiment(config)
+    trainer = pl.Trainer(
+        logger=logger,
+        callbacks=callbacks,
+        **config["trainer"])
+    trainer.fit(experiment, datamodule=dm)
+
+
+if __name__ == "__main__":
+    main()
