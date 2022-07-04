@@ -1,15 +1,15 @@
 seed: 42
 model:
   image_encoder: "microsoft/resnet-50"
-  text_encoder: "facebook/opt-1.3b"
+  text_encoder: "facebook/opt-2.7b"
   frozen_image_encoder: false
   frozen_text_encoder: true
   pretrained_text_encoder: true
   num_image_tokens: 2
 
 dataset:
-  name: COCO
-  path: "~/data/coco"
+  name: "CC3M"
+  path: "/datasets/conceptualcaptions"
 
 optimizer:
   algorithm: 'Adam'
@@ -19,10 +19,10 @@ optimizer:
   
 trainer:
   gpus: 1
-  max_epochs: 40
+  max_epochs: 1 
   precision: 16
   gradient_clip_val: 1.0
-  val_check_interval: 1.00
+  val_check_interval: 0.20
   resume_from_checkpoint: null
 
 # data loader

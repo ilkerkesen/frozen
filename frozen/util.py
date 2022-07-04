@@ -28,7 +28,7 @@ def create_logger(config):
     config['logger']['save_dir'] = osp.abspath(
         osp.expanduser(config['logger']['save_dir']))
     if config['logger']['name'] is None:
-        architecture = config['model']['name']
+        architecture = "frozen"
         config['logger']['name'] = f'{architecture}'
     logger = pl.loggers.TensorBoardLogger(**config['logger'])
     return logger
