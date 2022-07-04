@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 import hydra
 from omegaconf import OmegaConf
 
-from frozen.data import COCODataModule
+from frozen.data import CaptioningDataModule as DataModule
 from frozen.experiment import Experiment
 from frozen.util import create_callbacks, create_logger, process_config
 
@@ -21,7 +21,7 @@ def main(config):
     pl.seed_everything(config["seed"])
     print(config)
 
-    dm = COCODataModule(config)
+    dm = DataModule(config)
     logger = create_logger(config)
     callbacks = None
     if logger is not None:
