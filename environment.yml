@@ -1,0 +1,25 @@
+name: frozen
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - cudatoolkit=11.6.0
+  - ipython=8.3.0
+  - numpy=1.22.3
+  - pillow=9.1.1
+  - pip=21.2.4
+  - python=3.10.5
+  - pytorch=1.12.0=py3.10_cuda11.6_cudnn8.3.2_0
+  - torchaudio=0.12.0=py310_cu116
+  - torchvision=0.13.0=py310_cu116
+  - pip:
+    - hydra-core==1.2.0
+    - ipdb==0.13.9
+    - omegaconf==2.2.2
+    - pytorch-lightning==1.6.4
+    - tensorboard==2.9.1
+    - tokenizers==0.12.1
+    - torchmetrics==0.9.1
+    - tqdm==4.64.0
+    - transformers==4.20.1
