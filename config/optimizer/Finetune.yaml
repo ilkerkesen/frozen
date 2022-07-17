@@ -1,0 +1,5 @@
+algorithm: 'AdamW'
+params:
+  lr: 5.0e-5
+  weight_decay: 0.01
+  eps: 1.0e-6

@@ -41,3 +41,7 @@ def process_config(config):
     dataset_config['num_image_tokens'] = N
     config['dataset'] = dataset_config
     return config
+
+
+def is_clip_model(model_name):
+    return model_name.startswith('openai/clip-')

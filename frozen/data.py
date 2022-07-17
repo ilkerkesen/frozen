@@ -3,7 +3,6 @@ import os.path as osp
 import json
 import logging
 
-
 import torch
 import torch.nn as nn
 import numpy as np
@@ -11,8 +10,12 @@ import pandas as pd
 from PIL import Image, ImageFile, UnidentifiedImageError
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
-from transformers import GPT2Tokenizer, AutoFeatureExtractor
+from torchvision.transforms import Compose, Lambda
+from transformers import GPT2Tokenizer, AutoFeatureExtractor, CLIPFeatureExtractor
 from pytorch_lightning import LightningDataModule
+from timm.data.transforms_factory import create_transform
+
+from .util import is_clip_model
 
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -20,6 +23,31 @@ IMAGE_TOKEN = "<image>"
 SPECIAL_TOKEN_DICT = {'additional_special_tokens': [IMAGE_TOKEN]}
 NUM_IMAGE_TOKENS = 2
 PAD_TOKEN_ID = 1
+
+
+TIMM_CONFIGS = {
+    'nf_resnet50':  {
+        'input_size': (3, 256, 256),
+        'interpolation': 'bicubic',
+        'mean': (0.485, 0.456, 0.406),
+        'std': (0.229, 0.224, 0.225),
+        'crop_pct': 0.94,
+    },
+}
+
+
+def get_image_transform(model_name):
+    if model_name in TIMM_CONFIGS.keys():
+        config = TIMM_CONFIGS[model_name]
+        transform = create_transform(**config)
+        transform.transforms.append(
+            Lambda(lambda x: x.unsqueeze(0)),
+        )
+    elif is_clip_model(model_name):
+        transform = CLIPFeatureExtractor.from_pretrained(model_name)
+    else:
+        transform = AutoFeatureExtractor.from_pretrained(model_name)
+    return transform
 
 
 class COCODataset(Dataset):
@@ -47,29 +75,33 @@ class COCODataset(Dataset):
 
         if self.tokenizer is None:
             self.tokenizer = GPT2Tokenizer.from_pretrained("facebook/opt-2.7b")
-        
+
         if not IMAGE_TOKEN in self.tokenizer.all_special_tokens:
             self.tokenizer.add_special_tokens(SPECIAL_TOKEN_DICT)
-        
+
         self.setup_dataset()
 
     def setup_dataset(self):
         split, year = self.split, self.year
         self.split_name = f'{split}{year}'
-        self.image_dir = osp.join(self.path, 'images', self.split_name)
+        self.image_dir = osp.join(self.path, self.split_name)
         self.annotation_file = osp.join(
             self.path, 'annotations', f'captions_{self.split_name}.json')
 
         with open(self.annotation_file, 'r') as f:
             json_data = json.load(f)
             annotations = json_data['annotations']
-        
+
         image_dict = dict()
         for item in json_data['images']:
             image_dict[item['id']] = item
 
         self.annotations = annotations
-        self.image_dict = image_dict        
+        self.image_dict = image_dict
+
+    @property
+    def image_token_id(self):
+        return self.tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
 
     def __len__(self):
         return len(self.annotations)
@@ -78,10 +110,14 @@ class COCODataset(Dataset):
         image_id = self.annotations[index]['image_id']
         file_name = self.image_dict[image_id]['file_name']
         file_path = osp.join(self.image_dir, file_name)
-        image = Image.open(file_path)
-        if self.image_transform is not None:
-            image = self.image_transform(image, return_tensors='pt')
-        return image_id, image['pixel_values']
+        raw = Image.open(file_path)
+        raw = raw.convert('RGB') if raw.mode != 'RGB' else raw
+        if isinstance(self.image_transform, Compose):
+            image = self.image_transform(raw)
+        elif self.image_transform is not None:  # HuggingFace
+            image = self.image_transform(raw, return_tensors='pt')
+            image = image['pixel_values']
+        return image_id, raw, image
 
     def _add_image_tokens(self, caption):
         N = self.num_image_tokens
@@ -90,14 +126,27 @@ class COCODataset(Dataset):
             caption = f'{tokens} {caption}'
         return caption
 
-    def __getitem__(self, index):
-        image_id, image = self._read_image(index)
-        caption = self.annotations[index]['caption']
-        caption = self._add_image_tokens(caption)
-        inputs = self.tokenizer(caption, return_tensors='pt')
+    def _new_add_image_tokens(self, inputs):
+        N = self.num_image_tokens
+        I = self.tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
+        if N is not None or N > 0:
+            input_ids = [I for i in range(N)] + inputs['input_ids']
+            attention_mask = [1 for i in range(N)] + inputs['attention_mask']
+        return {
+            'input_ids': torch.tensor(input_ids).unsqueeze(0),
+            'attention_mask': torch.tensor(attention_mask).unsqueeze(0),
+        }
 
-        image_token_id = self.tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
-        image_token_mask = inputs['input_ids'] == image_token_id
+    def __getitem__(self, index):
+        try:
+            image_id, raw, image = self._read_image(index)
+        except:
+            image_id, raw, image = -1, None, None
+        caption = self.annotations[index]['caption']
+        inputs = self.tokenizer(caption)
+        inputs = self._new_add_image_tokens(inputs)
+
+        image_token_mask = inputs['input_ids'] == self.image_token_id
 
         return {
             'pixel_values': image,
@@ -108,8 +157,8 @@ class COCODataset(Dataset):
             'item_id': index,
             'image_id': image_id,
             'caption_id': self.annotations[index]['id'],
+            'raw_image': raw,
         }
-
 
 
 class CC3MDataset(COCODataset):
@@ -141,24 +190,27 @@ class CC3MDataset(COCODataset):
         file_name = self.annotations[index]['file_name']
         file_path = osp.join(self.path, file_name)
         try:
-            image = Image.open(file_path)
-            image = image.convert('RGB') if image.mode != 'RGB' else image
-        except UnidentifiedImageError:
-            image = None
-        
-        if image is not None and self.image_transform is not None:
-            image = self.image_transform(image, return_tensors='pt')
-        elif image is None:
-            image = {'pixel_values': None}
-        return image['pixel_values']
+            raw = Image.open(file_path)
+            raw = raw.convert('RGB') if raw.mode != 'RGB' else raw
+        except (UnidentifiedImageError, Image.DecompressionBombError) as e:
+            raw = None
 
-    
+        if raw is not None and isinstance(self.image_transform, Compose):
+            image = self.image_transform(raw)
+        elif raw is not None and self.image_transform is not None: # HuggingFace
+            image = self.image_transform(raw, return_tensors='pt')
+            image = image['pixel_values']
+        return raw, image
+
     def __getitem__(self, index):
         item = self.annotations[index]
-        image = self._read_image(index)
+        try:
+            raw, image = self._read_image(index)
+        except:
+            raw, image = None, None
         caption = item['caption']
-        caption = self._add_image_tokens(caption)
-        inputs = self.tokenizer(caption, return_tensors='pt')
+        inputs = self.tokenizer(caption)
+        inputs = self._new_add_image_tokens(inputs)
         image_token_id = self.tokenizer.convert_tokens_to_ids(IMAGE_TOKEN)
         image_token_mask = inputs['input_ids'] == image_token_id
 
@@ -171,6 +223,7 @@ class CC3MDataset(COCODataset):
             'item_id': index,
             'image_id': -1,
             'caption_id': -1,
+            'raw_image': raw,
         }
 
 
@@ -193,7 +246,7 @@ class CaptioningDataModule(LightningDataModule):
             'batch_size': 16,
         }
         return self.config.get('loader', default_config)
-    
+
     @property
     def dataset_config(self):
         return self.config.get('dataset', dict())
@@ -208,7 +261,7 @@ class CaptioningDataModule(LightningDataModule):
 
     def init_image_transform(self):
         arch = self.model_config.get('image_encoder', 'microsoft/resnet-50')
-        self.image_transform = AutoFeatureExtractor.from_pretrained(arch)
+        self.image_transform = get_image_transform(arch)
 
     def load_splits(self):
         self.train_data = self.load_split('train')
@@ -248,7 +301,7 @@ class CaptioningDataModule(LightningDataModule):
     def predict_dataloader(self):
         return self.val_dataloader()
 
-    
+
 def collate_fn(batch):
     batch = [x for x in batch if x['pixel_values'] is not None]
     batch_size = len(batch)
@@ -280,4 +333,3 @@ def collate_fn(batch):
         'image_ids': [x['image_id'] for x in batch],
         'caption_ids': [x['caption_id'] for x in batch],
     }
-    

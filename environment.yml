@@ -23,3 +23,4 @@ dependencies:
     - torchmetrics==0.9.1
     - tqdm==4.64.0
     - transformers==4.20.1
+    - timm==0.5.4

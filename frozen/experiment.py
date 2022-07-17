@@ -13,28 +13,44 @@ class Experiment(pl.LightningModule):
         self.loss_fn = nn.CrossEntropyLoss()
         self.save_hyperparameters(config)
 
+    @property
+    def model_config(self):
+        return self.model.config
+
+    @property
+    def num_image_tokens(self):
+        return self.model_config.get('num_image_tokens')
+
     def forward(self, *args, **kwargs):
         return self.model.forward(*args, **kwargs)
 
     def training_step(self, batch, batch_index):
-        mask = batch['image_token_mask'].nonzero(as_tuple=True)
-        labels = batch['input_ids'].clone()
-        labels[mask] = -100  # default ignore index
+        V = self.model.text_encoder.config.vocab_size
+        N = self.num_image_tokens
 
         kwargs = {
             'pixel_values': batch['pixel_values'],
             'input_ids': batch['input_ids'],
             'attention_mask': batch['attention_mask'],
             'image_token_mask': batch['image_token_mask'],
-            'labels': labels,
         }
 
         output = self.forward(**kwargs)
-        return {'loss': output.loss}
+        labels = batch['input_ids'].clone()
+        shift_logits = output.logits[..., N:-1, :].contiguous()
+        shift_labels = labels[..., N+1:].contiguous()
+        loss = self.loss_fn(shift_logits.view(-1, V), shift_labels.view(-1))
+        return {'loss': loss}
 
     @torch.no_grad()
     def validation_step(self, batch, batch_index):
         return self.training_step(batch, batch_index)
+
+    def validation_epoch_end(self, outputs):
+        val_loss = torch.stack([x['loss'] for x in outputs]).mean()
+        val_perplexity = val_loss.exp()
+        self.log('val_loss', val_loss)
+        self.log('val_perplexity', val_perplexity, prog_bar=True)
 
     @property
     def optimizer(self):
@@ -48,18 +64,12 @@ class Experiment(pl.LightningModule):
 
         return self.config.get('optimizer', default)
 
-
     def configure_optimizers(self):
         method = eval(f"optim.{self.optimizer['algorithm']}")
         params = self.optimizer['params']
-
-        parameters = list()
-        for child in self.model.children():
-            lr = params.get('lr')
-            parameters.append({'params': child.parameters(), 'lr': lr})
-
+        parameters = filter(lambda p: p.requires_grad, self.model.parameters())
         optimizer = method(parameters, **params)
 
         return {
             'optimizer': optimizer,
-        }       
+        }

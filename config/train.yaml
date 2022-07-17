@@ -1,33 +1,23 @@
 seed: 42
 model:
   image_encoder: "microsoft/resnet-50"
-  text_encoder: "facebook/opt-2.7b"
+  text_encoder: "facebook/opt-350m"
   frozen_image_encoder: false
   frozen_text_encoder: true
   pretrained_text_encoder: true
   num_image_tokens: 2
 
-dataset:
-  name: "CC3M"
-  path: "/datasets/conceptualcaptions"
-
-optimizer:
-  algorithm: 'Adam'
-  params:
-    lr: 0.0003
-    betas: [0.9, 0.95]
-  
 trainer:
   gpus: 1
   max_epochs: 1 
   precision: 16
   gradient_clip_val: 1.0
-  val_check_interval: 0.20
+  val_check_interval: 0.1
   resume_from_checkpoint: null
 
 # data loader
 loader:
-  batch_size: 16
+  batch_size: 10
   pin_memory: false
   num_workers: 5
 
@@ -35,14 +25,14 @@ loader:
 logger:
   name: null
   version: null
-  save_dir: ~/logs/frozen
+  save_dir: ~/logs
 
 # checkpoint
 checkpoint:
   save_top_k: 1
   save_last: true
   verbose: true
-  monitor: "val_loss"
+  monitor: "val_perplexity"
   mode: "min"
 
 # resume training
@@ -54,4 +44,7 @@ hydra:
     dir: .
 
 defaults:
+  - _self_
+  - dataset: CC3M
+  - optimizer: Frozen
   - override hydra/job_logging: disabled
