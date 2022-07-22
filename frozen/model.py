@@ -1,7 +1,7 @@
 from xml.sax.handler import property_declaration_handler
 import torch
 import torch.nn as nn
-from transformers import AutoConfig, AutoModel, CLIPVisionModel
+from transformers import AutoConfig, AutoModel, CLIPVisionModel, CLIPVisionConfig
 import timm
 from .custom_opt import CustomOPTCausalLM
 from .util import is_clip_model
@@ -16,7 +16,11 @@ def get_image_encoder(model_name):
     if model_name in TIMM_MODELS.keys():
         model = timm.create_model(model_name, pretrained=True, num_classes=0)
     elif is_clip_model(model_name):
-        model = CLIPVisionModel.from_pretrained(model_name)
+        config = CLIPVisionConfig.from_pretrained(model_name)
+        model = CLIPVisionModel.from_pretrained(
+            model_name,
+            config=config,
+        )
     else:
         model = AutoModel.from_pretrained(model_name)
     return model

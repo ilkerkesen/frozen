@@ -118,7 +118,7 @@ class CustomOPTDecoder(OPTDecoder):
             inputs_embeds = self.embed_tokens(input_ids)
 
         # replace <image> tokens with image_features
-        if image_token_mask is not None:
+        if image_token_mask is not None and past_key_values is None:
             d_model = inputs_embeds.shape[-1]
             ind = image_token_mask.nonzero(as_tuple=True)
             image_features = image_features.reshape(-1, d_model)
@@ -278,6 +278,7 @@ class CustomOPTModel(OPTPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         # decoder outputs consists of (dec_features, past_key_value, dec_hidden, dec_attn)
+        import ipdb; ipdb.set_trace()
         decoder_outputs = self.decoder(
             input_ids=input_ids,
             image_features=image_features,
@@ -479,6 +480,8 @@ class CustomOPTCausalLM(OPTPreTrainedModel):
         return {
             "input_ids": input_ids,  # encoder_outputs is defined. input_ids not needed
             "attention_mask": attention_mask,
+            "image_features": kwargs.get("image_features"),
+            "image_token_mask": kwargs.get("image_token_mask"),
             "past_key_values": past,
             "use_cache": use_cache,
         }
