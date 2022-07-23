@@ -47,7 +47,7 @@ class OPTCaptioningModel(nn.Module):
     @property
     def d_text_encoder(self):
         return self.text_encoder.config.word_embed_proj_dim
-    
+
     @property
     def d_image_encoder(self):
         model_name = self.config.get('image_encoder', 'microsoft/resnet-50')
@@ -55,8 +55,10 @@ class OPTCaptioningModel(nn.Module):
             return TIMM_MODELS[model_name]
         elif is_clip_model(model_name):
             return self.image_encoder.config.hidden_size
-        else:
+        elif model_name.startswith('microsoft/resnet-'):
             return self.image_encoder.config.hidden_sizes[-1]
+        else:
+            return self.image_encoder.config.hidden_size
 
     @property
     def device(self):
